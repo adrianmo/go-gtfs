@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/artonge/go-csv-tag/v2"
+	"github.com/gocarina/gocsv"
 )
 
 // Load - load GTFS files
@@ -21,12 +21,12 @@ import (
 func Load(dirPath string, filter map[string]bool) (*GTFS, error) {
 	_, err := os.Stat(dirPath)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("Error loading GTFS: directory does not exist")
+		return nil, fmt.Errorf("error loading GTFS: directory does not exist")
 	}
 	g := &GTFS{Path: dirPath}
 	err = loadGTFS(g, filter)
 	if err != nil {
-		return nil, fmt.Errorf("Error loading GTFS: '%v'\n	==> %v", g.Path, err)
+		return nil, fmt.Errorf("error loading GTFS: '%v'\n	==> %v", g.Path, err)
 	}
 	return g, nil
 }
@@ -53,7 +53,7 @@ func LoadSplitted(dirPath string, filter map[string]bool) ([]*GTFS, error) {
 		GTFSs[i] = &GTFS{Path: path.Join(dirPath, dir.Name())}
 		err := loadGTFS(GTFSs[i], filter)
 		if err != nil {
-			return nil, fmt.Errorf("Error loading GTFS: '%v'\n	==> %v", GTFSs[i].Path, err)
+			return nil, fmt.Errorf("error loading GTFS: '%v'\n	==> %v", GTFSs[i].Path, err)
 		}
 		i++
 	}
@@ -67,18 +67,25 @@ func LoadSplitted(dirPath string, filter map[string]bool) ([]*GTFS, error) {
 // @param g: the GTFS struct that will receive the data
 // @return an error
 func loadGTFS(g *GTFS, filter map[string]bool) error {
-	// Create a slice of agency to load agency.txt
-	var agencySlice []Agency
 	// List all files that will be loaded and there dest
 	filesToLoad := map[string]interface{}{
-		"agency.txt":         &agencySlice,
-		"calendar.txt":       &g.Calendars,
-		"calendar_dates.txt": &g.CalendarDates,
-		"routes.txt":         &g.Routes,
-		"stops.txt":          &g.Stops,
-		"stop_times.txt":     &g.StopsTimes,
-		"transfers.txt":      &g.Transfers,
-		"trips.txt":          &g.Trips,
+		"agency.txt":          &g.Agencies,
+		"calendar.txt":        &g.Calendars,
+		"calendar_dates.txt":  &g.CalendarDates,
+		"routes.txt":          &g.Routes,
+		"stops.txt":           &g.Stops,
+		"stop_times.txt":      &g.StopsTimes,
+		"transfers.txt":       &g.Transfers,
+		"trips.txt":           &g.Trips,
+		"shapes.txt":          &g.Shapes,
+		"fare_attributes.txt": &g.FareAttributes,
+		"fare_rules.txt":      &g.FareRules,
+		"frequencies.txt":     &g.Frequencies,
+		"pathways.txt":        &g.Pathways,
+		"levels.txt":          &g.Levels,
+		"feed_info.txt":       &g.FeedInfo,
+		"translations.txt":    &g.Translations,
+		"attributions.txt":    &g.Attributions,
 	}
 	// Load the files
 	for file, dest := range filesToLoad {
@@ -87,19 +94,17 @@ func loadGTFS(g *GTFS, filter map[string]bool) error {
 			continue
 		}
 		filePath := path.Join(g.Path, file)
-		// If the file does not existe, skip it
-		_, err := os.Stat(filePath)
+		// If the file does not exist, skip it
+		f, err := os.Open(filePath)
 		if os.IsNotExist(err) {
 			continue
 		}
-		err = csvtag.LoadFromPath(filePath, dest)
+		err = gocsv.UnmarshalFile(f, dest)
 		if err != nil {
-			return fmt.Errorf("Error loading file (%v)\n	==> %v", file, err)
+			_ = f.Close()
+			return fmt.Errorf("error loading file (%v)\n	==> %v", file, err)
 		}
-	}
-	// Put the loaded agency in g.Agency
-	if len(agencySlice) > 0 {
-		g.Agency = agencySlice[0]
+		_ = f.Close()
 	}
 	return nil
 }
@@ -121,14 +126,23 @@ func Dump(g *GTFS, dirPath string, filter map[string]bool) error {
 	}
 
 	files := map[string]interface{}{
-		"agency.txt":         []Agency{g.Agency},
-		"calendar.txt":       g.Calendars,
-		"calendar_dates.txt": g.CalendarDates,
-		"routes.txt":         g.Routes,
-		"stops.txt":          g.Stops,
-		"stop_times.txt":     g.StopsTimes,
-		"transfers.txt":      g.Transfers,
-		"trips.txt":          g.Trips,
+		"agency.txt":          g.Agencies,
+		"calendar.txt":        g.Calendars,
+		"calendar_dates.txt":  g.CalendarDates,
+		"routes.txt":          g.Routes,
+		"stops.txt":           g.Stops,
+		"stop_times.txt":      g.StopsTimes,
+		"transfers.txt":       g.Transfers,
+		"trips.txt":           g.Trips,
+		"shapes.txt":          g.Shapes,
+		"fare_attributes.txt": g.FareAttributes,
+		"fare_rules.txt":      g.FareRules,
+		"frequencies.txt":     g.Frequencies,
+		"pathways.txt":        g.Pathways,
+		"levels.txt":          g.Levels,
+		"feed_info.txt":       g.FeedInfo,
+		"translations.txt":    g.Translations,
+		"attributions.txt":    g.Attributions,
 	}
 	for file, src := range files {
 		if filter != nil && !filter[file[:len(file)-4]] {
@@ -138,11 +152,16 @@ func Dump(g *GTFS, dirPath string, filter map[string]bool) error {
 			continue
 		}
 		filePath := path.Join(dirPath, file)
-
-		err := csvtag.DumpToFile(src, filePath)
+		f, err := os.Create(filePath)
 		if err != nil {
-			return fmt.Errorf("Error dumping file %v: %v", file, err)
+			return fmt.Errorf("error creating file %v: %v", file, err)
 		}
+
+		if err := gocsv.MarshalFile(src, f); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("error dumping file %v: %v", file, err)
+		}
+		_ = f.Close()
 	}
 	return nil
 }
