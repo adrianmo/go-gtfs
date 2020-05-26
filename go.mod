@@ -1,4 +1,4 @@
-module github.com/weasel-software/go-gtfs
+module github.com/adrianmo/go-gtfs
 
 go 1.14
 
